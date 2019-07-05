@@ -3,3 +3,8 @@ name = "rabscuttle_telnet"
 version = "0.1.0"
 authors = ["Örjan Fors <o@42mm.org>"]
 edition = "2018"
+
+[dependencies]
+log = "0.4"
+# TODO: this is only needed testing!
+env_logger = "0.6"

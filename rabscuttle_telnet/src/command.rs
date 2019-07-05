@@ -1,4 +1,5 @@
 use std::convert::From;
+use std::error::Error;
 use std::fmt;
 
 /// A telnet command or special values.
@@ -8,7 +9,19 @@ pub struct Command(u8);
 /// A possible error value when converting a `Command` from a `u8`.
 #[derive(Debug)]
 pub struct InvalidCommand {
-    _priv: (),
+    invalid_src: u8,
+}
+
+impl fmt::Display for InvalidCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid command")
+    }
+}
+
+impl Error for InvalidCommand {
+    fn description(&self) -> &str {
+        "invalid command"
+    }
 }
 
 // #[derive(Debug)]
@@ -48,7 +61,7 @@ impl Command {
     pub fn from_u8(src: u8) -> Result<Command, InvalidCommand> {
         match src {
             236...255 => Ok(Command(src)),
-            _ => Err(InvalidCommand::new()),
+            _ => Err(InvalidCommand { invalid_src: src }),
         }
     }
 
@@ -100,12 +113,6 @@ impl fmt::Display for Command {
             u8::from(*self),
             self.canonical_reason().unwrap_or("<unknown command>")
         )
-    }
-}
-
-impl InvalidCommand {
-    fn new() -> InvalidCommand {
-        InvalidCommand { _priv: () }
     }
 }
 
@@ -187,6 +194,6 @@ mod test {
     fn command_from_u8() {
         assert_eq!(Command::from_u8(255).unwrap(), Command::IAC);
         assert_eq!(Command::IAC, 255);
-        Command::from_u8(235).expect_err("unexpected command");
+        assert_eq!(Command::from_u8(235).unwrap_err().invalid_src, 235);
     }
 }

@@ -1,4 +1,5 @@
 use std::convert::From;
+use std::error::Error;
 use std::fmt;
 
 /// A telnet option value.
@@ -8,7 +9,19 @@ pub struct Opt(u8);
 /// A possible error value when converting a `Option` from a `u8`.
 #[derive(Debug)]
 pub struct InvalidOption {
-    _priv: (),
+    invalid_src: u8,
+}
+
+impl fmt::Display for InvalidOption {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid option")
+    }
+}
+
+impl Error for InvalidOption {
+    fn description(&self) -> &str {
+        "invalid option"
+    }
 }
 
 impl Opt {
@@ -17,7 +30,7 @@ impl Opt {
         match src {
             1...39 => Ok(Opt(src)),
             70 | 85 | 86 | 93 | 255 => Ok(Opt(src)),
-            _ => Err(InvalidOption::new()),
+            _ => Err(InvalidOption { invalid_src: src }),
         }
     }
 
@@ -69,12 +82,6 @@ impl fmt::Display for Opt {
             u8::from(*self),
             self.canonical_reason().unwrap_or("<unknown option>")
         )
-    }
-}
-
-impl InvalidOption {
-    fn new() -> InvalidOption {
-        InvalidOption { _priv: () }
     }
 }
 
@@ -147,8 +154,9 @@ telnet_options! {
     (39, NEW_ENVIRON, "NEW_ENVIRON");
     (70, MSSP, "MSSP");
     (85, COMPRESS, "COMPRESS");
+    /// Also known as MCCP 2
+    /// https://tintin.sourceforge.io/protocols/mccp/
     (86, COMPRESS2, "COMPRESS2");
-    // (86, MCCP2, "MCCP2"); // duplicate
     (93, ZMP, "ZMP");
     (255, EXOPL, "EXOPL");
 }
@@ -160,9 +168,8 @@ mod test {
     #[test]
     fn option_from_u8() {
         assert_eq!(Opt::from_u8(86).unwrap(), Opt::COMPRESS2);
-        // assert_eq!(Opt::from_u8(86).unwrap(), Opt::MCCP2);
         assert_eq!(Opt::COMPRESS2, 86);
         // assert_eq!(Opt::MCCP2, 86);
-        Opt::from_u8(254).expect_err("unexpected option");
+        assert_eq!(Opt::from_u8(254).unwrap_err().invalid_src, 254);
     }
 }
