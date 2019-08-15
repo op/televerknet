@@ -11,8 +11,8 @@ use log::debug;
 
 pub mod command;
 pub mod option;
+pub mod q;
 
-use command::Command;
 
 const MAX_INTERMEDIATES: usize = 1024;
 const MAX_SUBS: usize = 8;
@@ -31,10 +31,14 @@ pub enum State {
     // Data is found and triggered from new line or GA command.
     // Data,
     Data,
-    // State is entered when command IAC is recognised.
+    // IacEntry is entered when command IAC is recognised.
     IacEntry,
-    // SubEntry is entered from IAC, for SB until SE is encountered.
+    // NegEntry is entered from IAC, for WILL, WONT, DO and DONT.
+    NegEntry,
+    // SubEntry is entered from IAC, for SB until SE is encountered. SubEntry is the initial state
+    // for sub entries, and then the state is moved to SubIntermediate.
     SubEntry,
+    // SubIntermediate is transition to from SubEntry.
     SubIntermediate,
 }
 
@@ -45,9 +49,10 @@ pub enum Action {
     Clear,
     Collect,
     Execute,
-    DataDispatch, // TODO: distinguish between null, carriage return and go-ahead
-    // GoAhead,
+    DataDispatch,
     IacDispatch,
+    NegStart,
+    NegDispatch,
     SubStart,
     SubPut,
     SubDispatch,
@@ -62,6 +67,7 @@ impl State {
             State::Ground => Action::None,
             State::Data => Action::DataDispatch,
             State::IacEntry => Action::None,
+            State::NegEntry => Action::None,
             State::SubEntry => Action::SubStart,
             State::SubIntermediate => Action::None,
         }
@@ -74,6 +80,7 @@ impl State {
             State::Ground => Action::None,
             State::Data => Action::Clear,
             State::IacEntry => Action::None,
+            State::NegEntry => Action::None,
             State::SubEntry => Action::None,
             State::SubIntermediate => Action::None,
         }
@@ -87,12 +94,9 @@ pub struct Parser {
     state: State,
     intermediates: [u8; MAX_INTERMEDIATES],
     intermediate_idx: usize,
+    neg_command: u8,
     subs: [u8; MAX_SUBS],
     sub_idx: usize,
-    // params: [i64; MAX_PARAMS],
-    // param: i64,
-    // collecting_param: bool,
-    // num_params: usize,
     ignoring: bool,
 }
 
@@ -102,20 +106,12 @@ impl Parser {
             state: State::Ground,
             intermediates: [0u8; MAX_INTERMEDIATES],
             intermediate_idx: 0,
+            neg_command: 0,
             subs: [0u8; MAX_SUBS],
             sub_idx: 0,
-            // params: [0i64; MAX_PARAMS],
-            // param: 0,
-            // collecting_param: false,
-            // num_params: 0,
             ignoring: false,
         }
     }
-
-    // #[inline]
-    // fn params(&self) -> &[i64] {
-    //     &self.params[..self.num_params]
-    // }
 
     #[inline]
     fn intermediates(&self) -> &[u8] {
@@ -145,36 +141,33 @@ impl Parser {
         match self.state {
             State::Ground | State::Data => {
                 match byte {
-                    0x00 => return (State::Data, Action::Execute),
-                    0x0d => return (State::Data, Action::Execute),
-                    0x0a => return (State::Data, Action::Execute),
-                    // 0x00...0x10 => return (State::Ground, Action::Execute),
-                    _ => (),
-                }
-                // TODO: add TELNET_FLAG_NVT_EOL?
-                match Command::from_u8(byte) {
-                    Ok(Command::IAC) => return (State::IacEntry, Action::None),
-                    _ => (), //return (State::Ground, Action::Collect),
-                }
-
-                if byte & (1 << 7) != 0 {
-                    return (State::Data, Action::Execute);
-                } else {
-                    return (State::Ground, Action::Collect);
+                    // Non-printable bytes
+                    0x00...0x1f => (State::Data, Action::Execute),
+                    // Collect printable characters
+                    0x20...0x7f => (State::Ground, Action::Collect),
+                    // Various commands
+                    0x80...0xfe => (State::Data, Action::Execute),
+                    // Beginning of IAC sequence
+                    0xff => (State::IacEntry, Action::None),
                 }
             }
             State::IacEntry => {
-                let command = Command::from_u8(byte);
-                match command {
-                    Ok(Command::SB) => return (State::SubEntry, Action::None),
-                    _ => return (State::Ground, Action::IacDispatch),
+                match byte {
+                    // Beginning of subnegotation
+                    0xfa => (State::SubEntry, Action::None),
+                    // Beginning of negotation using WILL, WONT, DO or DONT
+                    0xfb...0xfe => (State::NegEntry, Action::NegStart),
+                    // Command to dispatch to interpret
+                    _ => (State::Ground, Action::IacDispatch),
                 }
             }
+            State::NegEntry => (State::Ground, Action::NegDispatch),
             State::SubEntry | State::SubIntermediate => {
-                let command = Command::from_u8(byte);
-                match command {
-                    Ok(Command::SE) => return (State::Ground, Action::SubDispatch),
-                    _ => return (State::SubIntermediate, Action::SubPut),
+                match byte {
+                    // End of subnegotiation parameters
+                    0xf0 => (State::Ground, Action::SubDispatch),
+                    // Continuation of subnegotation
+                    _ => (State::SubIntermediate, Action::SubPut),
                 }
             }
         }
@@ -197,10 +190,6 @@ impl Parser {
         }
 
         match state {
-            // State::Anywhere => {
-            //     // Just run the action
-            //     self.perform_action(performer, action, byte);
-            // }
             state => {
                 // Exit action for previous state
                 let exit_action = self.state.exit_action();
@@ -248,10 +237,13 @@ impl Parser {
             Action::Ignore | Action::None => (),
             Action::Clear => {
                 self.intermediate_idx = 0;
-                // self.num_params = 0;
                 self.ignoring = false;
             }
             Action::IacDispatch => performer.iac_dispatch(byte),
+            Action::NegStart => {
+                self.neg_command = byte;
+            }
+            Action::NegDispatch => performer.negotiate_dispatch(self.neg_command, byte),
             Action::SubStart => {
                 self.sub_idx = 0;
             }
@@ -288,8 +280,9 @@ pub trait Perform {
     fn sub_dispatch(&mut self, subs: &[u8]);
 
     /// Negotiate event: WILL, WONT, DO, DONT
-    fn negotiate_dispatch(&mut self, opt: u8);
+    fn negotiate_dispatch(&mut self, cmd: u8, opt: u8);
 
+    // TODO: duplicate from sub_dispathch?
     /// Subnegotiate event
     fn subnegotiate_dispatch(&mut self, params: &[u8], opt: u8);
 
@@ -333,6 +326,7 @@ mod tests {
         ignoring: Vec<bool>,
         execute: Vec<u8>,
         iac: Vec<u8>,
+        negs: Vec<(u8, u8)>,
         subs: Vec<Vec<u8>>,
     }
 
@@ -351,7 +345,9 @@ mod tests {
         fn sub_dispatch(&mut self, subs: &[u8]) {
             self.subs.push(subs.to_vec());
         }
-        fn negotiate_dispatch(&mut self, _opt: u8) {}
+        fn negotiate_dispatch(&mut self, cmd: u8, opt: u8) {
+            self.negs.push((cmd, opt));
+        }
         fn subnegotiate_dispatch(&mut self, _params: &[u8], _opt: u8) {}
         fn zmp_dispatch(&mut self, _params: &[&[u8]]) {}
         fn ttypes_dispatch(&mut self, _cmd: u8, _terminal_type: &[u8]) {}
@@ -360,6 +356,25 @@ mod tests {
 
     #[test]
     fn parse_iac() {
+        init_test_logging();
+
+        static BYTES: &'static [u8] = &[
+            255, // IAC
+            246, // AYT
+        ];
+
+        let mut dispatcher = IacDispatcher::default();
+        let mut parser = Parser::new();
+        for byte in BYTES {
+            parser.advance(&mut dispatcher, *byte);
+        }
+
+        assert_eq!(dispatcher.iac.len(), 1);
+        assert_eq!(dispatcher.iac[0], 246);
+    }
+
+    #[test]
+    fn parse_iac_will() {
         init_test_logging();
 
         static BYTES: &'static [u8] = &[
@@ -374,8 +389,9 @@ mod tests {
             parser.advance(&mut dispatcher, *byte);
         }
 
-        assert_eq!(dispatcher.iac.len(), 1);
-        assert_eq!(dispatcher.iac[0], 251);
+        assert_eq!(dispatcher.negs.len(), 1);
+        assert_eq!(dispatcher.negs[0].0, 251);
+        assert_eq!(dispatcher.negs[0].1, 24);
     }
 
     #[test]
@@ -421,6 +437,7 @@ mod tests {
     #[test]
     fn parse_ayt() {
         init_test_logging();
+
         let mut dispatcher = IacDispatcher::default();
         let mut parser = Parser::new();
         for byte in &[b'r', 246, b's', 0x0d, 0x0a] {
