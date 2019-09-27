@@ -60,7 +60,7 @@ impl Command {
     // TODO: return ParseError?
     pub fn from_u8(src: u8) -> Result<Command, InvalidCommand> {
         match src {
-            236...255 => Ok(Command(src)),
+            236..=255 => Ok(Command(src)),
             _ => Err(InvalidCommand { invalid_src: src }),
         }
     }

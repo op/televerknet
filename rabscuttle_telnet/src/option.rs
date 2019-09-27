@@ -28,7 +28,7 @@ impl Opt {
     // TODO: return ParseError?
     pub fn from_u8(src: u8) -> Result<Opt, InvalidOption> {
         match src {
-            1...39 => Ok(Opt(src)),
+            1..=39 => Ok(Opt(src)),
             70 | 85 | 86 | 93 | 255 => Ok(Opt(src)),
             _ => Err(InvalidOption { invalid_src: src }),
         }

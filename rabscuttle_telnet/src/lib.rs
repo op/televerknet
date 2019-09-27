@@ -142,11 +142,11 @@ impl Parser {
             State::Ground | State::Data => {
                 match byte {
                     // Non-printable bytes
-                    0x00...0x1f => (State::Data, Action::Execute),
+                    0x00..=0x1f => (State::Data, Action::Execute),
                     // Collect printable characters
-                    0x20...0x7f => (State::Ground, Action::Collect),
+                    0x20..=0x7f => (State::Ground, Action::Collect),
                     // Various commands
-                    0x80...0xfe => (State::Data, Action::Execute),
+                    0x80..=0xfe => (State::Data, Action::Execute),
                     // Beginning of IAC sequence
                     0xff => (State::IacEntry, Action::None),
                 }
@@ -156,7 +156,7 @@ impl Parser {
                     // Beginning of subnegotation
                     0xfa => (State::SubEntry, Action::None),
                     // Beginning of negotation using WILL, WONT, DO or DONT
-                    0xfb...0xfe => (State::NegEntry, Action::NegStart),
+                    0xfb..=0xfe => (State::NegEntry, Action::NegStart),
                     // Command to dispatch to interpret
                     _ => (State::Ground, Action::IacDispatch),
                 }
