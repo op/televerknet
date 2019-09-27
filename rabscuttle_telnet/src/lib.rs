@@ -65,7 +65,7 @@ impl State {
         match self {
             State::Ground => Action::None,
             State::Data => Action::DataDispatch,
-            State::IacEntry => Action::None,
+            State::IacEntry => Action::DataDispatch,
             State::NegEntry => Action::None,
             State::SubEntry => Action::SubStart,
             State::SubIntermediate => Action::None,
@@ -78,7 +78,7 @@ impl State {
         match self {
             State::Ground => Action::None,
             State::Data => Action::Clear,
-            State::IacEntry => Action::None,
+            State::IacEntry => Action::Clear,
             State::NegEntry => Action::None,
             State::SubEntry => Action::None,
             State::SubIntermediate => Action::None,
@@ -376,6 +376,30 @@ mod tests {
             parser.advance(&mut dispatcher, *byte);
         }
 
+        assert_eq!(dispatcher.negs.len(), 1);
+        assert_eq!(dispatcher.negs[0].0, 251);
+        assert_eq!(dispatcher.negs[0].1, 24);
+    }
+
+    #[test]
+    fn parse_mixed_iac_will() {
+        init_test_logging();
+
+        static BYTES: &'static [u8] = &[
+            b'r', b's', // data
+            255,  // IAC
+            251,  // WILL
+            24,   // TERMINAL-TYPE
+        ];
+
+        let mut dispatcher = IacDispatcher::default();
+        let mut parser = Parser::new();
+        for byte in BYTES {
+            parser.advance(&mut dispatcher, *byte);
+        }
+
+        assert_eq!(dispatcher.intermediates.len(), 1);
+        assert_eq!(dispatcher.intermediates[0], &[b'r', b's']);
         assert_eq!(dispatcher.negs.len(), 1);
         assert_eq!(dispatcher.negs[0].0, 251);
         assert_eq!(dispatcher.negs[0].1, 24);
