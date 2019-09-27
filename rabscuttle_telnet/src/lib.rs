@@ -7,7 +7,6 @@
 //! [Joe Wilm's vte library]: https://github.com/jwilm/vte
 //! [Paul Williams' ANSI parser state machine]: https://vt100.net/emu/dec_ansi_parser
 extern crate log;
-use log::debug;
 
 pub mod command;
 pub mod option;
@@ -120,7 +119,6 @@ impl Parser {
 
     #[inline]
     fn subs(&self) -> &[u8] {
-        debug!("> subs {:?}", self.sub_idx);
         &self.subs[..self.sub_idx]
     }
 
@@ -132,7 +130,6 @@ impl Parser {
     #[inline]
     pub fn advance<P: Perform>(&mut self, performer: &mut P, byte: u8) {
         let (state, action) = self.get_action(byte);
-        debug!("> advance {:02x} -> {:?} {:?}", byte, state, action);
         self.perform_state_change(performer, state, action, byte);
     }
 
@@ -193,22 +190,12 @@ impl Parser {
             state => {
                 // Exit action for previous state
                 let exit_action = self.state.exit_action();
-                debug!(
-                    "! > {:?} exit action: {:?}",
-                    self.state,
-                    self.state.exit_action()
-                );
                 maybe_action!(exit_action, 0);
 
                 // Transition action
                 maybe_action!(action, byte);
 
                 // Entry action for new state
-                debug!(
-                    "! > {:?} entry action: {:?}",
-                    state,
-                    self.state.entry_action()
-                );
                 maybe_action!(state.entry_action(), 0);
 
                 // Assume the new state
