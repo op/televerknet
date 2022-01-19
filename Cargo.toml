@@ -1,5 +1,5 @@
 [package]
-name = "rabscuttle_telnet"
+name = "televerknet"
 version = "0.1.0"
 authors = ["Örjan Fors <o@42mm.org>"]
 edition = "2018"
